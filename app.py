@@ -2,6 +2,7 @@ import logging
 import sys
 import warnings
 
+import dagshub
 import mlflow
 import mlflow.sklearn
 import numpy as np
@@ -11,10 +12,9 @@ from sklearn.linear_model import ElasticNet
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 
-
+# Setup logging
 logging.basicConfig(level=logging.WARN)
 logger = logging.getLogger(__name__)
-
 
 def eval_metrics(actual, predicted):
     rmse = np.sqrt(mean_squared_error(actual, predicted))
@@ -22,17 +22,17 @@ def eval_metrics(actual, predicted):
     r2 = r2_score(actual, predicted)
     return rmse, mae, r2
 
-
 if __name__ == "__main__":
     warnings.filterwarnings("ignore")
     np.random.seed(40)
 
-    # Local MLflow database
-    mlflow.set_tracking_uri(
-        "sqlite:////Users/vansh/Documents/MLflow/mlflow.db"
-    )
+    # 1. Initialize DagsHub tracking (Sets remote URI automatically)
+    dagshub.init(repo_owner='vansh100101102', repo_name='mlflow', mlflow=True)
+
+    # 2. Set your experiment name
     mlflow.set_experiment("Wine Quality Experiment")
 
+    # Load dataset
     csv_url = (
         "https://raw.githubusercontent.com/mlflow/mlflow/master/"
         "tests/datasets/winequality-red.csv"
@@ -44,6 +44,7 @@ if __name__ == "__main__":
         logger.exception("Unable to download dataset: %s", error)
         sys.exit(1)
 
+    # Train/test split
     train, test = train_test_split(
         data,
         test_size=0.25,
@@ -55,15 +56,16 @@ if __name__ == "__main__":
     train_y = train["quality"]
     test_y = test["quality"]
 
+    # Read hyperparameter arguments from CLI
     alpha = float(sys.argv[1]) if len(sys.argv) > 1 else 0.5
     l1_ratio = float(sys.argv[2]) if len(sys.argv) > 2 else 0.5
 
+    # Train model
     model = ElasticNet(
         alpha=alpha,
         l1_ratio=l1_ratio,
         random_state=42,
     )
-
     model.fit(train_x, train_y)
     predicted_qualities = model.predict(test_x)
 
@@ -75,6 +77,7 @@ if __name__ == "__main__":
     print(f"  MAE: {mae}")
     print(f"  R2: {r2}")
 
+    # 3. Log parameters, metrics, and model to DagsHub remote server
     with mlflow.start_run():
         mlflow.log_param("alpha", alpha)
         mlflow.log_param("l1_ratio", l1_ratio)
@@ -85,8 +88,7 @@ if __name__ == "__main__":
 
         mlflow.sklearn.log_model(
             model,
-            name="model",
+            artifact_path="model",
             signature=signature,
-            serialization_format="cloudpickle",
             registered_model_name="ElasticnetWineModel",
         )
